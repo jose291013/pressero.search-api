@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Pressero Search Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:24px;max-width:980px}
+    .card{border:1px solid #eee;border-radius:12px;padding:16px;margin:14px 0}
+    input[type=file], input[type=text]{width:100%;padding:10px;border:1px solid #ddd;border-radius:10px}
+    button{padding:10px 14px;border:0;border-radius:10px;background:#111;color:#fff;cursor:pointer}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    pre{background:#0b1020;color:#e8e8e8;padding:12px;border-radius:12px;overflow:auto}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media(max-width:720px){.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <h1>Pressero Search Admin</h1>
+
+  <div class="card">
+    <h3>1) Upload CSV + Reindex</h3>
+    <form id="uploadForm">
+      <input type="file" name="file" id="csvFile" accept=".csv,text/csv" required />
+      <div style="height:10px"></div>
+      <button type="submit" id="btnUpload">Reindex</button>
+    </form>
+    <p style="color:#666;margin-top:8px">
+      Le CSV doit contenir les colonnes Pressero (Product Name, Url Name, Site Group 1..5, etc.).
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>2) Test Search</h3>
+    <div class="row">
+      <div>
+        <label>Query</label>
+        <input id="q" type="text" placeholder="ex: signaletique" />
+      </div>
+      <div>
+        <label>Email</label>
+        <input id="email" type="text" placeholder="ex: jose.nieto@aleyant.com" />
+      </div>
+    </div>
+    <div style="height:10px"></div>
+    <button id="btnTest">Search</button>
+  </div>
+
+  <div class="card">
+    <h3>Logs</h3>
+    <pre id="log">Ready.</pre>
+  </div>
+
+<script>
+  const log = (obj) => {
+    const el = document.getElementById("log");
+    el.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+  };
+
+  document.getElementById("uploadForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = document.getElementById("csvFile").files[0];
+    if (!f) return;
+
+    document.getElementById("btnUpload").disabled = true;
+    log("Uploading & reindexing...");
+
+    const fd = new FormData();
+    fd.append("file", f);
+
+    const resp = await fetch("/admin/reindex-ui", { method: "POST", body: fd });
+    const data = await resp.json().catch(()=>({error:"Invalid JSON"}));
+    log(data);
+    document.getElementById("btnUpload").disabled = false;
+  });
+
+  document.getElementById("btnTest").addEventListener("click", async () => {
+    const q = document.getElementById("q").value.trim();
+    const email = document.getElementById("email").value.trim();
+    if (!q || !email) return log("Enter q + email");
+
+    log("Searching...");
+    const resp = await fetch("/api/search?q=" + encodeURIComponent(q) + "&email=" + encodeURIComponent(email) + "&limit=10");
+    const data = await resp.json().catch(()=>({error:"Invalid JSON"}));
+    log(data);
+  });
+</script>
+</body>
+</html>
