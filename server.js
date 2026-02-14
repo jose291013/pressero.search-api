@@ -33,7 +33,7 @@ const {
   // Admin UI protection (simple)
   ADMIN_UI_KEY, // ex: "mysecret"
   // Pressero admin auth
-  PRESSERO_ADMIN_BASE = "https://admin.chi.v6.pressero.com",
+  PRESSERO_ADMIN_BASE = "https://admin.ams.v6.pressero.com",
   PRESSERO_AUTH_PATH = "/api/V2/Authentication",
   PRESSERO_USER = "admin",
   PRESSERO_PASS = "admin",
@@ -270,6 +270,19 @@ app.post("/admin/reindex-ui", requireAdminUi, upload.single("file"), async (req,
       relax_column_count: true,
       bom: true
     });
+    // Reindex (accepte /admin/reindex ET /reindex)
+app.post(['/admin/reindex', '/reindex'], upload.single('file'), async (req, res) => {
+  // ... ton handler reindex ici ...
+});
+
+// Search (accepte /api/search ET /search)
+app.get(['/api/search', '/search'], async (req, res) => {
+  // ... ton handler search ici ...
+});
+
+// Healthcheck
+app.get(['/healthz', '/health'], (req, res) => res.status(200).send('ok'));
+
 
     const docs = [];
     for (const r of records) {
