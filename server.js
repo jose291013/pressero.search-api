@@ -165,7 +165,7 @@ function buildProductDoc(row) {
 
 async function ensureIndexSettings() {
   await index.updateSettings({
-    searchableAttributes: ["name", "shortDesc", "longDesc", "slug", "partNumber", "publicPartNum"],
+    searchableAttributes: ["name", "shortDesc", "longDesc", "slug","categories","primaryCategory", "partNumber", "publicPartNum"],
     filterableAttributes: ["active", "siteGroups","slug"],
     rankingRules: ["words", "typo", "proximity", "attribute", "sort", "exactness"],
     synonyms: {
