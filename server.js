@@ -570,7 +570,6 @@ app.get("/api/search", async (req, res) => {
 });
 
 // Suggestions (typeahead)
-// Suggestions (typeahead)
 app.get("/api/suggest", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
