@@ -346,6 +346,38 @@ app.get("/api/search", async (req, res) => {
     res.status(500).json({ error: "Search failed", detail: String(e?.message || e) });
   }
 });
+// Suggestions (typeahead)
+app.get("/api/suggest", async (req, res) => {
+  try {
+    const q = String(req.query.q ?? "").trim();
+    const limit = Math.min(Number(req.query.limit ?? 6), 20);
+
+    if (!q) return res.json({ q, hits: [] });
+
+    const result = await index.search(q, {
+      limit,
+      filter: "active = true",
+      attributesToRetrieve: ["id", "name", "url", "slug", "image", "shortDesc"],
+      matchingStrategy: "last" // bien pour suggestions (prefix-ish)
+    });
+
+    res.json({
+      q,
+      hits: (result.hits || []).map(h => ({
+        id: h.id,
+        name: h.name,
+        url: h.url,
+        slug: h.slug,
+        image: h.image,
+        shortDesc: h.shortDesc
+      }))
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Suggest failed", detail: String(e?.message || e) });
+  }
+});
+
 
 
 app.get("/health", (_, res) => res.json({ ok: true }));
