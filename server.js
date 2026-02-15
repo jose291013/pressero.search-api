@@ -171,31 +171,51 @@ async function getPresseroToken() {
 
 async function presseroFetchJson(url) {
   const token = await getPresseroToken();
-  const resp = await fetch(url, {
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Accept": "application/json"
-    }
-  });
+
+  async function callWith(authValue) {
+    return await fetch(url, {
+      headers: {
+        "Authorization": authValue,
+        "Accept": "application/json"
+      }
+    });
+  }
+
+  // 1) Essai standard: Bearer
+  let resp = await callWith(`Bearer ${token}`);
+
+  // 2) Certains environnements attendent le token "brut"
+  if (resp.status === 401) {
+    resp = await callWith(token);
+  }
+
   if (!resp.ok) {
     const txt = await resp.text().catch(() => "");
-    // si token expiré / 401, on retente une fois
+
+    // si 401 => on force un refresh token et on retente (Bearer puis brut)
     if (resp.status === 401) {
       presseroToken = null;
+
       const token2 = await getPresseroToken();
-      const resp2 = await fetch(url, {
-        headers: { "Authorization": `Bearer ${token2}`, "Accept": "application/json" }
-      });
+
+      let resp2 = await callWith(`Bearer ${token2}`);
+      if (resp2.status === 401) {
+        resp2 = await callWith(token2);
+      }
+
       if (!resp2.ok) {
         const txt2 = await resp2.text().catch(() => "");
         throw new Error(`Pressero API ${resp2.status}: ${txt2.slice(0, 300)}`);
       }
       return await resp2.json();
     }
+
     throw new Error(`Pressero API ${resp.status}: ${txt.slice(0, 300)}`);
   }
+
   return await resp.json();
 }
+
 
 // ---------------- Groups cache (email -> groups) ----------------
 const ttlMs = Number(GROUP_CACHE_TTL_MS);
@@ -300,8 +320,14 @@ app.get("/api/search", async (req, res) => {
 
     if (!email) return res.json({ q, total: 0, hits: [], groups: [] });
 
-    const groups = await getGroupsForEmail(email);
-    if (!groups.length) return res.json({ q, total: 0, hits: [], groups });
+    let groups = [];
+try {
+  if (email) groups = await getGroupsForEmail(email);
+} catch (e) {
+  console.error("Groups lookup failed (continuing without group filter):", e?.message || e);
+  groups = [];
+}
+
 
     const filters = ["active = true"];
     const gf = buildMeiliGroupFilter(groups);
