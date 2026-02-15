@@ -283,10 +283,16 @@ app.post(["/admin/reindex", "/admin/reindex-ui", "/reindex"], requireAdminUi, up
   try {
     if (!req.file) return res.status(400).json({ error: "Missing file" });
 
-    const csvText = req.file.buffer.toString("utf8");
-    const firstLine = (csvText.split(/\r?\n/)[0] || "");
-const delimiter = (firstLine.includes(";") && !firstLine.includes(",")) ? ";" : ",";
+    let csvText = req.file.buffer.toString("utf8");
 
+// enlever BOM à coup sûr
+csvText = csvText.replace(/^\uFEFF/, "");
+
+// détecter le séparateur sur la 1ère ligne
+const firstLine = (csvText.split(/\r?\n/)[0] || "");
+const delimiter = firstLine.includes(";") ? ";" : ",";
+
+// parse robuste
 const records = parse(csvText, {
   delimiter,
   columns: true,
@@ -296,6 +302,8 @@ const records = parse(csvText, {
   bom: true,
   trim: true
 });
+
+
 
 
     const docs = [];
@@ -321,6 +329,8 @@ for (const r of records) {
 
     await ensureIndexSettings();
     const task = await index.addDocuments(docs, { primaryKey: "id" });
+    const sampleKeys = records && records[0] ? Object.keys(records[0]).slice(0, 10) : [];
+
 
     return res.json({
   ok: true,
@@ -328,11 +338,15 @@ for (const r of records) {
   indexed: docs.length,
   skipped,
   reasons,
+  detectedDelimiter: delimiter,
+  sampleKeys,
   taskUid: task.taskUid
 });
 
+
   } catch (e) {
     console.error(e);
+    
     return res.status(500).json({ error: "Reindex failed", detail: String(e?.message || e) });
   }
 });
