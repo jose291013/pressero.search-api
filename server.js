@@ -311,32 +311,24 @@ app.post(["/admin/reindex", "/admin/reindex-ui", "/reindex"], requireAdminUi, up
 
 
 // Public search endpoint
+// Public search endpoint (SANS email / SANS groupes)
 app.get("/api/search", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
     const limit = Math.min(Number(req.query.limit ?? 12), 50);
     const offset = Math.max(Number(req.query.offset ?? 0), 0);
-    const email = String(req.query.email ?? "").trim();
 
-    if (!email) return res.json({ q, total: 0, hits: [], groups: [] });
-
-    let groups = [];
-try {
-  if (email) groups = await getGroupsForEmail(email);
-} catch (e) {
-  console.error("Groups lookup failed (continuing without group filter):", e?.message || e);
-  groups = [];
-}
-
-
+    // filtre simple: on ne renvoie que les produits actifs
     const filters = ["active = true"];
-    const gf = buildMeiliGroupFilter(groups);
-    if (gf) filters.push(gf);
 
-    const result = await index.search(q, { limit, offset, filter: filters.join(" AND ") });
+    const result = await index.search(q, {
+      limit,
+      offset,
+      filter: filters.join(" AND ")
+    });
 
     res.json({
-      q, email, groups,
+      q,
       total: result.estimatedTotalHits ?? 0,
       hits: (result.hits || []).map(h => ({
         id: h.id,
@@ -354,6 +346,7 @@ try {
     res.status(500).json({ error: "Search failed", detail: String(e?.message || e) });
   }
 });
+
 
 app.get("/health", (_, res) => res.json({ ok: true }));
 
