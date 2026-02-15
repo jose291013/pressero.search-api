@@ -6,6 +6,9 @@ import { parse } from "csv-parse/sync";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import cheerio from "cheerio";
+import pLimit from "p-limit";
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,6 +54,64 @@ if (!MEILI_HOST || !MEILI_KEY) console.error("Missing MEILI_HOST / MEILI_KEY");
 
 const meili = new MeiliSearch({ host: MEILI_HOST, apiKey: MEILI_KEY });
 const index = meili.index(INDEX_NAME);
+
+function normalizeText(s){
+  return String(s || "").replace(/\s+/g, " ").trim();
+}
+
+function escapeMeiliFilterValue(s){
+  // Meilisearch filter string literal needs quotes escaped
+  return String(s || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+async function fetchHtml(url){
+  const r = await fetch(url, {
+    headers: { "User-Agent": "pressero-search/1.0" }
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+  return await r.text();
+}
+
+function extractProductLinksFromSitemapHtml(html, origin){
+  const $ = cheerio.load(html);
+  const out = new Set();
+
+  $("a[href]").each((_, a) => {
+    const href = $(a).attr("href");
+    if (!href) return;
+    let abs = "";
+    try { abs = new URL(href, origin).toString(); } catch { return; }
+    if (abs.toLowerCase().includes("/product/")) out.add(abs);
+  });
+
+  return Array.from(out);
+}
+
+function extractBreadcrumbCategories(html){
+  const $ = cheerio.load(html);
+
+  // ton HTML: <div id="breadcrumb"><ol class="breadcrumb">...
+  const items = [];
+  $("#breadcrumb ol.breadcrumb li").each((_, li) => {
+    const txt = normalizeText($(li).text());
+    if (txt) items.push(txt);
+  });
+
+  // Exemple que tu as donné :
+  // ["Tous les produits", "Imprimerie", "Flyers"]
+  // On enlève "Tous les produits"
+  const cleaned = items.filter(t => t.toLowerCase() !== "tous les produits");
+
+  // On garde le chemin complet (catégorie + sous-catégorie)
+  const categories = cleaned;
+
+  return {
+    categories,
+    primaryCategory: categories.length ? categories[categories.length - 1] : "",
+    categoryPath: categories.join(" > ")
+  };
+}
+
 
 // ---------------- Helpers: Product parsing ----------------
 function normBool(v) {
@@ -261,6 +322,97 @@ function buildMeiliGroupFilter(groups) {
   if (!groups?.length) return null;
   return "(" + groups.map(g => `siteGroups = "${esc(g)}"`).join(" OR ") + ")";
 }
+app.post("/admin/enrich-categories-from-sitemap", requireAdminUi, async (req, res) => {
+  try {
+    const ORIGIN = "https://decoration.ams.v6.pressero.com";
+    const SITEMAP_URL = ORIGIN + "/sitemap";
+
+    const max = Math.min(Number(req.query.max || 2000), 20000);   // limite sécurité
+    const concurrency = Math.min(Number(req.query.c || 4), 10);   // 4-6 conseillé
+
+    const sitemapHtml = await fetchHtml(SITEMAP_URL);
+    let productUrls = extractProductLinksFromSitemapHtml(sitemapHtml, ORIGIN);
+    productUrls = productUrls.slice(0, max);
+
+    const limit = pLimit(concurrency);
+
+    let processed = 0;
+    let updated = 0;
+    let notFoundInMeili = 0;
+    let noBreadcrumb = 0;
+    const samples = [];
+
+    async function findDocIdBySlug(slug){
+      // on cherche le doc existant (primaryKey = id) via filter sur slug
+      const f = `slug = "${escapeMeiliFilterValue(slug)}"`;
+      const r = await index.search(slug, {
+        limit: 1,
+        filter: f,
+        attributesToRetrieve: ["id", "slug"]
+      });
+      const hit = (r.hits && r.hits[0]) ? r.hits[0] : null;
+      return hit ? hit.id : null;
+    }
+
+    await Promise.all(productUrls.map(url =>
+      limit(async () => {
+        processed++;
+
+        // slug = après /product/
+        const slug = url.split("/product/")[1]?.split(/[?#]/)[0] || "";
+        if (!slug) return;
+
+        let html = "";
+        try {
+          html = await fetchHtml(url);
+        } catch {
+          return;
+        }
+
+        const { categories, primaryCategory, categoryPath } = extractBreadcrumbCategories(html);
+
+        if (!categories.length) {
+          noBreadcrumb++;
+          return;
+        }
+
+        const id = await findDocIdBySlug(slug);
+        if (!id) {
+          notFoundInMeili++;
+          return;
+        }
+
+        await index.updateDocuments([{
+          id,
+          categories,
+          primaryCategory,
+          categoryPath
+        }]);
+
+        updated++;
+
+        if (samples.length < 5) {
+          samples.push({ slug, id, categories, categoryPath });
+        }
+      })
+    ));
+
+    return res.json({
+      ok: true,
+      sitemap: SITEMAP_URL,
+      processed,
+      updated,
+      noBreadcrumb,
+      notFoundInMeili,
+      samples
+    });
+
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
 
 // ---------------- Admin UI auth (simple) ----------------
 // Use: /admin?key=XXXX
@@ -306,10 +458,10 @@ const records = parse(csvText, {
 
 
 
-    const docs = [];
+const docs = [];
 
 let total = 0, skipped = 0;
-const reasons = { no_id: 0, no_name: 0, no_slug: 0 };
+const reasons = { no_id: 0, no_name: 0 };
 
 for (const r of records) {
   total++;
@@ -319,12 +471,11 @@ for (const r of records) {
   if (!doc.id) { skipped++; reasons.no_id++; continue; }
   if (!doc.name) { skipped++; reasons.no_name++; continue; }
 
-  // Si tu génères slug automatiquement dans buildProductDoc, tu peux SUPPRIMER ce test.
-  // Je le laisse pour diagnostiquer rapidement.
-  if (!doc.slug) { skipped++; reasons.no_slug++; continue; }
-
+  // slug NON bloquant
   docs.push(doc);
 }
+
+
 
 
     await ensureIndexSettings();
@@ -375,7 +526,11 @@ app.get("/api/search", async (req, res) => {
         limit,
         offset,
         filter: filters.join(" AND "),
-        attributesToRetrieve: ["id","name","url","slug","image","shortDesc","partNumber","publicPartNum"]
+        attributesToRetrieve: [
+  "id","name","url","slug","image","shortDesc","partNumber","publicPartNum",
+  "categories","primaryCategory","categoryPath"
+]
+
       });
     }
 
@@ -394,15 +549,19 @@ app.get("/api/search", async (req, res) => {
       q,
       total: result.estimatedTotalHits ?? 0,
       hits: (result.hits || []).map(h => ({
-        id: h.id,
-        name: h.name,
-        url: h.url,
-        slug: h.slug,
-        image: h.image,
-        shortDesc: h.shortDesc,
-        partNumber: h.partNumber,
-        publicPartNum: h.publicPartNum
-      }))
+  id: h.id,
+  name: h.name,
+  url: h.url,
+  slug: h.slug,
+  image: h.image,
+  shortDesc: h.shortDesc,
+  partNumber: h.partNumber,
+  publicPartNum: h.publicPartNum,
+  categories: Array.isArray(h.categories) ? h.categories : [],
+  primaryCategory: h.primaryCategory || "",
+  categoryPath: h.categoryPath || ""
+}))
+
     });
   } catch (e) {
     console.error(e);
@@ -420,15 +579,26 @@ app.get("/api/suggest", async (req, res) => {
     const result = await index.search(q, {
       limit,
       filter: "active = true",
-      attributesToRetrieve: ["id", "name", "url", "image", "shortDesc"],
+      attributesToRetrieve: [
+  "id","name","url","image","shortDesc",
+  "categories","primaryCategory","categoryPath"
+]
+,
       matchingStrategy: "last"
     });
 
-    res.json({ q, hits: result.hits || [] });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Suggest failed", detail: String(e?.message || e) });
-  }
+    res.json({
+  q,
+  hits: (result.hits || []).map(h => ({
+    id: h.id,
+    name: h.name,
+    url: h.url,
+    image: h.image,
+    shortDesc: h.shortDesc,
+    categories: Array.isArray(h.categories) ? h.categories : [],
+    primaryCategory: h.primaryCategory || "",
+    categoryPath: h.categoryPath || ""
+  }))
 });
 
 
