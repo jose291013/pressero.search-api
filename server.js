@@ -325,14 +325,28 @@ app.get("/api/search", async (req, res) => {
     const limit = Math.min(Number(req.query.limit ?? 12), 50);
     const offset = Math.max(Number(req.query.offset ?? 0), 0);
 
-    // filtre simple: on ne renvoie que les produits actifs
     const filters = ["active = true"];
+    if (!q) return res.json({ q, total: 0, hits: [] });
 
-    const result = await index.search(q, {
-      limit,
-      offset,
-      filter: filters.join(" AND ")
-    });
+    async function doSearch(query) {
+      return await index.search(query, {
+        limit,
+        offset,
+        filter: filters.join(" AND "),
+        attributesToRetrieve: ["id","name","url","slug","image","shortDesc","partNumber","publicPartNum"]
+      });
+    }
+
+    let result = await doSearch(q);
+
+    // ✅ fallback auto si 0 hit (pluriel/singulier basique)
+    if (!(result.hits || []).length) {
+      const q2 = pluralFallback(q);
+      if (q2) {
+        const r2 = await doSearch(q2);
+        if ((r2.hits || []).length) result = r2;
+      }
+    }
 
     res.json({
       q,
@@ -353,6 +367,7 @@ app.get("/api/search", async (req, res) => {
     res.status(500).json({ error: "Search failed", detail: String(e?.message || e) });
   }
 });
+
 // Suggestions (typeahead)
 app.get("/api/suggest", async (req, res) => {
   try {
