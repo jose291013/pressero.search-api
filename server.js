@@ -284,13 +284,19 @@ app.post(["/admin/reindex", "/admin/reindex-ui", "/reindex"], requireAdminUi, up
     if (!req.file) return res.status(400).json({ error: "Missing file" });
 
     const csvText = req.file.buffer.toString("utf8");
-    const records = parse(csvText, {
-      columns: true,
-      skip_empty_lines: true,
-      relax_quotes: true,
-      relax_column_count: true,
-      bom: true
-    });
+    const firstLine = (csvText.split(/\r?\n/)[0] || "");
+const delimiter = (firstLine.includes(";") && !firstLine.includes(",")) ? ";" : ",";
+
+const records = parse(csvText, {
+  delimiter,
+  columns: true,
+  skip_empty_lines: true,
+  relax_quotes: true,
+  relax_column_count: true,
+  bom: true,
+  trim: true
+});
+
 
     const docs = [];
 
