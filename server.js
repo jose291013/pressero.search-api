@@ -6,7 +6,7 @@ import { parse } from "csv-parse/sync";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";
 import pLimit from "p-limit";
 
 
