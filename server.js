@@ -90,29 +90,27 @@ function extractProductLinksFromSitemapHtml(html, origin){
 function extractBreadcrumbCategories(html){
   const $ = cheerio.load(html);
 
-  // ton HTML: <div id="breadcrumb"><ol class="breadcrumb">...
   const items = [];
   $("#breadcrumb ol.breadcrumb li").each((_, li) => {
     const txt = normalizeText($(li).text());
     if (txt) items.push(txt);
   });
 
-  // Exemple que tu as donné :
-  // ["Tous les produits", "Imprimerie", "Flyers"]
-  // On enlève "Tous les produits"
-  const cleaned = items.filter(t => t.toLowerCase() !== "tous les produits");
+  // enlève "Tous les produits" et "All Products"
+  const categories = items.filter(t => {
+    const x = t.toLowerCase();
+    return x !== "tous les produits" && x !== "all products";
+  });
 
-  // On garde le chemin complet (catégorie + sous-catégorie)
-  const categories = cleaned;
+  const primaryCategory = categories.length ? categories[categories.length - 1] : "";
+  const categoryPath = categories.join(" > ");
+
   const categoriesNorm = categories.map(normKey);
-const primaryCategoryNorm = primaryCategory ? normKey(primaryCategory) : "";
+  const primaryCategoryNorm = primaryCategory ? normKey(primaryCategory) : "";
 
-  return {
-    categories,
-    primaryCategory: categories.length ? categories[categories.length - 1] : "",
-    categoryPath: categories.join(" > ")
-  };
+  return { categories, primaryCategory, categoryPath, categoriesNorm, primaryCategoryNorm };
 }
+
 
 
 // ---------------- Helpers: Product parsing ----------------
@@ -400,7 +398,9 @@ app.post("/admin/enrich-categories-from-sitemap", requireAdminUi, async (req, re
           return;
         }
 
-        const { categories, primaryCategory, categoryPath } = extractBreadcrumbCategories(html);
+        const { categories, primaryCategory, categoryPath, categoriesNorm, primaryCategoryNorm }
+  = extractBreadcrumbCategories(html);
+
 
         if (!categories.length) {
           noBreadcrumb++;
