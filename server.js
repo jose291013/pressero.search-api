@@ -166,7 +166,7 @@ function buildProductDoc(row) {
 async function ensureIndexSettings() {
   await index.updateSettings({
     searchableAttributes: ["name", "shortDesc", "longDesc", "slug", "partNumber", "publicPartNum"],
-    filterableAttributes: ["active", "siteGroups"],
+    filterableAttributes: ["active", "siteGroups","slug"],
     rankingRules: ["words", "typo", "proximity", "attribute", "sort", "exactness"],
     synonyms: {
       "signaletique": ["signalétique", "enseigne", "panneau", "plv"],
