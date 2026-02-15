@@ -104,6 +104,8 @@ function extractBreadcrumbCategories(html){
 
   // On garde le chemin complet (catégorie + sous-catégorie)
   const categories = cleaned;
+  const categoriesNorm = categories.map(normKey);
+const primaryCategoryNorm = primaryCategory ? normKey(primaryCategory) : "";
 
   return {
     categories,
@@ -118,6 +120,14 @@ function normBool(v) {
   const s = String(v ?? "").trim().toLowerCase();
   return s === "vrai" || s === "true" || s === "1" || s === "yes";
 }
+function normKey(s){
+  return String(s || "")
+    .normalize("NFD")                 // sépare accents
+    .replace(/[\u0300-\u036f]/g, "")  // supprime accents
+    .toLowerCase()
+    .trim();
+}
+
 
 function stripHtml(html) {
   let s = String(html ?? "");
@@ -165,8 +175,29 @@ function buildProductDoc(row) {
 
 async function ensureIndexSettings() {
   await index.updateSettings({
-    searchableAttributes: ["name", "shortDesc", "longDesc", "slug","categories","primaryCategory", "partNumber", "publicPartNum"],
-    filterableAttributes: ["active", "siteGroups","slug"],
+    searchableAttributes: [
+  "name",
+  "shortDesc",
+  "longDesc",
+  "categories",
+  "primaryCategory",
+  "categoryPath",
+  "categoriesNorm",
+  "primaryCategoryNorm",
+  "slug",
+  "partNumber",
+  "publicPartNum"
+],
+    filterableAttributes: [
+  "active",
+  "siteGroups",
+  "slug",
+  "categories",
+  "primaryCategory",
+  "categoriesNorm",
+  "primaryCategoryNorm"
+],
+
     rankingRules: ["words", "typo", "proximity", "attribute", "sort", "exactness"],
     synonyms: {
       "signaletique": ["signalétique", "enseigne", "panneau", "plv"],
@@ -383,11 +414,14 @@ app.post("/admin/enrich-categories-from-sitemap", requireAdminUi, async (req, re
         }
 
         await index.updateDocuments([{
-          id,
-          categories,
-          primaryCategory,
-          categoryPath
-        }]);
+  id,
+  categories,
+  primaryCategory,
+  categoryPath,
+  categoriesNorm,
+  primaryCategoryNorm
+}]);
+
 
         updated++;
 
@@ -520,6 +554,40 @@ app.get("/api/search", async (req, res) => {
 
     const filters = ["active = true"];
     if (!q) return res.json({ q, total: 0, hits: [] });
+    const qNorm = normKey(q);
+
+async function isKnownCategoryNorm(catNorm) {
+  const safe = String(catNorm).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const r = await index.search("", {
+    limit: 1,
+    filter: `active = true AND categoriesNorm = "${safe}"`,
+    attributesToRetrieve: ["id"]
+  });
+  return (r.estimatedTotalHits ?? (r.hits ? r.hits.length : 0)) > 0;
+}
+
+// Si la requête correspond à une catégorie (sans accents / sans casse),
+// on filtre strictement sur categoriesNorm
+if (await isKnownCategoryNorm(qNorm)) {
+  const safe = qNorm.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  filters.push(`categoriesNorm = "${safe}"`);
+}
+
+
+    async function isKnownCategory(catLabel) {
+      const safe = String(catLabel).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      const r = await index.search("", {
+        limit: 1,
+        filter: `active = true AND categories = "${safe}"`,
+        attributesToRetrieve: ["id"]
+      });
+      return (r.estimatedTotalHits ?? (r.hits ? r.hits.length : 0)) > 0;
+    }
+
+    if (await isKnownCategory(q)) {
+      const safe = q.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      filters.push(`categories = "${safe}"`);
+    }
 
     async function doSearch(query) {
       return await index.search(query, {
@@ -527,14 +595,15 @@ app.get("/api/search", async (req, res) => {
         offset,
         filter: filters.join(" AND "),
         attributesToRetrieve: [
-  "id","name","url","slug","image","shortDesc","partNumber","publicPartNum",
-  "categories","primaryCategory","categoryPath"
-]
-
+          "id","name","url","slug","image","shortDesc","partNumber","publicPartNum",
+          "categories","primaryCategory","categoryPath"
+        ]
       });
     }
 
     let result = await doSearch(q);
+    
+
 
     // ✅ fallback auto si 0 hit (pluriel/singulier basique)
     if (!(result.hits || []).length) {
