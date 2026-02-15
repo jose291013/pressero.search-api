@@ -310,8 +310,15 @@ app.post(["/admin/reindex", "/admin/reindex-ui", "/reindex"], requireAdminUi, up
 });
 
 
-// Public search endpoint
 // Public search endpoint (SANS email / SANS groupes)
+function pluralFallback(q) {
+  const s = q.trim();
+  if (s.length < 3) return null;
+  // si l'utilisateur tape "banderolle" -> on tente "banderolles"
+  if (!s.endsWith("s")) return s + "s";
+  // si l'utilisateur tape "banderolles" -> on tente "banderolle"
+  return s.slice(0, -1);
+}
 app.get("/api/search", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
@@ -351,14 +358,14 @@ app.get("/api/suggest", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
     const limit = Math.min(Number(req.query.limit ?? 6), 20);
-
     if (!q) return res.json({ q, hits: [] });
 
     const result = await index.search(q, {
       limit,
       filter: "active = true",
-      attributesToRetrieve: ["id", "name", "url", "slug", "image", "shortDesc"],
-      matchingStrategy: "last" // bien pour suggestions (prefix-ish)
+      attributesToRetrieve: ["id", "name", "url", "image", "shortDesc"],
+      // pour suggestions : on privilégie "la fin" (meilleur pour préfixe)
+      matchingStrategy: "last"
     });
 
     res.json({
@@ -367,7 +374,6 @@ app.get("/api/suggest", async (req, res) => {
         id: h.id,
         name: h.name,
         url: h.url,
-        slug: h.slug,
         image: h.image,
         shortDesc: h.shortDesc
       }))
@@ -377,6 +383,7 @@ app.get("/api/suggest", async (req, res) => {
     res.status(500).json({ error: "Suggest failed", detail: String(e?.message || e) });
   }
 });
+
 
 
 
