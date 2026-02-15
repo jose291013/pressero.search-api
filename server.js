@@ -570,6 +570,7 @@ app.get("/api/search", async (req, res) => {
 });
 
 // Suggestions (typeahead)
+// Suggestions (typeahead)
 app.get("/api/suggest", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
@@ -580,29 +581,31 @@ app.get("/api/suggest", async (req, res) => {
       limit,
       filter: "active = true",
       attributesToRetrieve: [
-  "id","name","url","image","shortDesc",
-  "categories","primaryCategory","categoryPath"
-]
-,
+        "id","name","url","image","shortDesc",
+        "categories","primaryCategory","categoryPath"
+      ],
       matchingStrategy: "last"
     });
 
-    res.json({
-  q,
-  hits: (result.hits || []).map(h => ({
-    id: h.id,
-    name: h.name,
-    url: h.url,
-    image: h.image,
-    shortDesc: h.shortDesc,
-    categories: Array.isArray(h.categories) ? h.categories : [],
-    primaryCategory: h.primaryCategory || "",
-    categoryPath: h.categoryPath || ""
-  }))
+    return res.json({
+      q,
+      hits: (result.hits || []).map(h => ({
+        id: h.id,
+        name: h.name,
+        url: h.url,
+        image: h.image,
+        shortDesc: h.shortDesc,
+        categories: Array.isArray(h.categories) ? h.categories : [],
+        primaryCategory: h.primaryCategory || "",
+        categoryPath: h.categoryPath || ""
+      }))
+    });
+
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Suggest failed", detail: String(e?.message || e) });
+  }
 });
-
-
-
 
 app.get("/health", (_, res) => res.json({ ok: true }));
 
