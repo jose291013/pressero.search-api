@@ -293,16 +293,38 @@ app.post(["/admin/reindex", "/admin/reindex-ui", "/reindex"], requireAdminUi, up
     });
 
     const docs = [];
-    for (const r of records) {
-      const doc = buildProductDoc(r);
-      if (!doc.id || !doc.name || !doc.slug) continue;
-      docs.push(doc);
-    }
+
+let total = 0, skipped = 0;
+const reasons = { no_id: 0, no_name: 0, no_slug: 0 };
+
+for (const r of records) {
+  total++;
+
+  const doc = buildProductDoc(r);
+
+  if (!doc.id) { skipped++; reasons.no_id++; continue; }
+  if (!doc.name) { skipped++; reasons.no_name++; continue; }
+
+  // Si tu génères slug automatiquement dans buildProductDoc, tu peux SUPPRIMER ce test.
+  // Je le laisse pour diagnostiquer rapidement.
+  if (!doc.slug) { skipped++; reasons.no_slug++; continue; }
+
+  docs.push(doc);
+}
+
 
     await ensureIndexSettings();
     const task = await index.addDocuments(docs, { primaryKey: "id" });
 
-    return res.json({ ok: true, indexed: docs.length, taskUid: task.taskUid });
+    return res.json({
+  ok: true,
+  totalRows: total,
+  indexed: docs.length,
+  skipped,
+  reasons,
+  taskUid: task.taskUid
+});
+
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "Reindex failed", detail: String(e?.message || e) });
@@ -379,20 +401,10 @@ app.get("/api/suggest", async (req, res) => {
       limit,
       filter: "active = true",
       attributesToRetrieve: ["id", "name", "url", "image", "shortDesc"],
-      // pour suggestions : on privilégie "la fin" (meilleur pour préfixe)
       matchingStrategy: "last"
     });
 
-    res.json({
-      q,
-      hits: (result.hits || []).map(h => ({
-        id: h.id,
-        name: h.name,
-        url: h.url,
-        image: h.image,
-        shortDesc: h.shortDesc
-      }))
-    });
+    res.json({ q, hits: result.hits || [] });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Suggest failed", detail: String(e?.message || e) });
