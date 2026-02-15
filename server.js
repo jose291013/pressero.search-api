@@ -258,8 +258,8 @@ app.get("/admin", requireAdminUi, (req, res) => {
   res.send(html);
 });
 
-// Reindex from UI (upload)
-app.post("/admin/reindex-ui", requireAdminUi, upload.single("file"), async (req, res) => {
+// accepte: /admin/reindex  /admin/reindex-ui  /reindex
+app.post(["/admin/reindex", "/admin/reindex-ui", "/reindex"], requireAdminUi, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Missing file" });
 
@@ -271,19 +271,6 @@ app.post("/admin/reindex-ui", requireAdminUi, upload.single("file"), async (req,
       relax_column_count: true,
       bom: true
     });
-    // Reindex (accepte /admin/reindex ET /reindex)
-app.post(['/admin/reindex', '/reindex'], upload.single('file'), async (req, res) => {
-  // ... ton handler reindex ici ...
-});
-
-// Search (accepte /api/search ET /search)
-app.get(['/api/search', '/search'], async (req, res) => {
-  // ... ton handler search ici ...
-});
-
-// Healthcheck
-app.get(['/healthz', '/health'], (req, res) => res.status(200).send('ok'));
-
 
     const docs = [];
     for (const r of records) {
@@ -295,12 +282,13 @@ app.get(['/healthz', '/health'], (req, res) => res.status(200).send('ok'));
     await ensureIndexSettings();
     const task = await index.addDocuments(docs, { primaryKey: "id" });
 
-    res.json({ ok: true, indexed: docs.length, taskUid: task.taskUid });
+    return res.json({ ok: true, indexed: docs.length, taskUid: task.taskUid });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: "Reindex failed", detail: String(e?.message || e) });
+    return res.status(500).json({ error: "Reindex failed", detail: String(e?.message || e) });
   }
 });
+
 
 // Public search endpoint
 app.get("/api/search", async (req, res) => {
